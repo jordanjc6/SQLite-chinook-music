@@ -1,0 +1,171 @@
+Analyzing the Data:
+
+Which tracks appeared in the most playlists? how many playlist did they appear in?
+
+SOL'N:
+
+WITH unnamed_tracks AS (
+SELECT playlist_track.TrackId AS 'TrackID', COUNT(playlists.PlaylistId) AS 'PlaylistApps'
+FROM playlist_track
+JOIN playlists
+ON playlist_track.PlaylistId = playlists.PlaylistId
+GROUP BY 1
+ORDER BY 2 DESC
+)
+SELECT tracks.Name, unnamed_tracks.PlaylistApps
+FROM unnamed_tracks
+JOIN tracks
+ON unnamed_tracks.TrackID = Tracks.TrackId;
+
+Which track generated the most revenue? which album? which genre?
+
+SOL'N: 
+
+Which track...
+
+SELECT TrackId, COUNT(InvoiceLineId) AS 'Sells',
+	UnitPrice, ( COUNT(InvoiceLineId) * UnitPrice ) AS 'Revenue'
+FROM invoice_items
+GROUP BY TrackId;
+
+Which album...
+
+WITH trackRevenues AS (
+SELECT TrackId, COUNT(InvoiceLineId) AS 'Sells',
+	UnitPrice, ( COUNT(InvoiceLineId) * UnitPrice ) AS 'Revenue'
+FROM invoice_items
+GROUP BY TrackId
+), albumRevenues AS ( 
+SELECT tracks.AlbumId, SUM(trackRevenues.Revenue) AS 'AlbumRevenue'
+FROM trackRevenues
+JOIN tracks
+ON trackRevenues.TrackId = tracks.TrackId
+GROUP BY 1
+ORDER BY 2 DESC
+)
+SELECT albums.Title AS 'AlbumTitle', albumRevenues.AlbumRevenue 
+FROM albums
+JOIN albumRevenues
+ON albums.AlbumId = albumRevenues.AlbumId;
+
+Which genre...
+
+WITH genreRevenues AS (
+SELECT tracks.GenreId AS 'Genre',
+	( COUNT(invoice_items.InvoiceLineId) * invoice_items.UnitPrice ) AS 'Revenue'
+FROM invoice_items
+JOIN tracks
+ON invoice_items.TrackId = tracks.TrackId
+GROUP BY tracks.GenreId
+ORDER BY 2
+)
+SELECT genres.GenreId, genres.Name, genreRevenues.Revenue
+FROM genreRevenues
+JOIN genres
+ON genreRevenues.Genre = genres.GenreId;
+
+Which countries have the highest sales revenue? What percent of total revenue does each country make up?
+
+SOL'N:
+
+WITH countryRevenues AS (
+SELECT BillingCountry AS 'Country', SUM(Total) AS 'Revenue'
+FROM invoices
+GROUP BY Country
+), globalRevenue AS (
+SELECT SUM(Total) AS 'Summation' FROM invoices
+)
+SELECT countryRevenues.Country, countryRevenues.Revenue,
+	ROUND( (countryRevenues.Revenue / globalRevenue.Summation), 4 ) * 100 AS 'Global%'
+FROM countryRevenues
+JOIN globalRevenue;
+
+How many customers did each employee support, what is the average revenue for each sale, and what
+is their total sale? --Assume each supportrepid assigned to each customer helped with all of their purchases
+
+SOL'N:
+
+How many customers...
+
+SELECT employees.FirstName AS 'Employee', COUNT(customers.SupportRepId) AS 'CustomersHelped'
+FROM customers
+JOIN employees
+ON customers.SupportRepId = employees.EmployeeId
+GROUP BY customers.SupportRepId;
+
+Average revenue and total sale...
+
+SELECT employees.FirstName AS 'Employee', COUNT(customers.SupportRepId) AS 'Transactions',
+	ROUND( SUM(invoices.Total), 2 ) AS 'TotalSales', 
+	ROUND( ( ROUND( SUM(invoices.Total), 2 ) / COUNT(customers.SupportRepId) ), 2 ) AS 'AverageRevenue'
+FROM customers
+JOIN employees
+ON customers.SupportRepId = employees.EmployeeId
+JOIN invoices
+ON customers.CustomerId = invoices.CustomerId
+GROUP BY SupportRepId;
+
+
+
+Intermediate Challenge:
+
+Do longer or shorter length albums tend to generate more revenue?
+(Hint: We can use the WITH clause to create a temporary table that determines the number of tracks
+in each album, then group by the length of the album to compare the average revenue generated for each).
+
+SOL'N:
+
+WITH albumLengths AS (
+SELECT albums.AlbumId, albums.Title, COUNT(tracks.TrackId) AS 'Songs'
+FROM albums
+JOIN tracks
+ON albums.AlbumId = tracks.AlbumId
+GROUP BY albums.AlbumId
+), trackRevenues AS (
+SELECT TrackId, COUNT(InvoiceLineId) AS 'Sells',
+	UnitPrice, ( COUNT(InvoiceLineId) * UnitPrice ) AS 'Revenue'
+FROM invoice_items
+GROUP BY TrackId
+), albumRevenues AS ( 
+SELECT tracks.AlbumId, SUM(trackRevenues.Revenue) AS 'AlbumRevenue'
+FROM trackRevenues
+JOIN tracks
+ON trackRevenues.TrackId = tracks.TrackId
+GROUP BY 1
+ORDER BY 2 DESC
+)
+SELECT albumLengths.Songs, ROUND( AVG(albumRevenues.AlbumRevenue), 2 ) AS 'AvgRevenue'
+FROM albumLengths
+JOIN albumRevenues
+ON albumLengths.AlbumId = albumRevenues.AlbumId
+GROUP BY albumLengths.Songs;
+
+
+
+Advanced Challenge:
+
+How much revenue is generated each year, and what is its percent change from the previous year?
+Hint: The InvoiceDate field is formatted as ‘yyyy-mm-dd hh:mm:ss’. Try taking a look at using
+the strftime() function to help extract just the year. Then, we can use a subquery in the SELECT
+statement to query the total revenue from the previous year. Remember that strftime() returns the
+date as a string, so we would need to CAST it to an integer type for this part. Finally, since we
+cannot refer to a column alias in the SELECT statement, it may be useful to use the WITH clause
+to query the previous year total in a temporary table, and then calculate the percent change in 
+the final SELECT statement.
+
+SOL'N:
+
+WITH currentYear AS (
+SELECT strftime('%Y', invoices.InvoiceDate) AS 'Year', SUM(invoices.total) AS 'Revenue'
+FROM invoices
+GROUP BY 1
+), previousYear AS (
+SELECT strftime('%Y', invoices.InvoiceDate) + 1 AS 'Year', SUM(invoices.total) AS 'Revenue'
+FROM invoices
+GROUP BY 1
+)
+SELECT currentYear.Year, currentYear.Revenue, 
+	ROUND( (currentYear.Revenue - previousYear.Revenue) / previousYear.Revenue * 100, 2 ) AS 'PercentChange'
+FROM currentYear
+LEFT JOIN previousYear
+ON CAST(currentYear.Year AS INTEGER) = CAST(previousYear.Year AS INTEGER);
